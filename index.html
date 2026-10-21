@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tariff Abolition CGE Explorer</title>
+<meta name="description" content="Interactive explorer for a dynamic recursive CGE model's tariff-abolition scenario.">
+<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+<style>
+  :root {
+    --bg: #faf9f7; --panel: #ffffff; --fg: #1c1c1e; --fg-muted: #6b6b6f;
+    --border: #e4e2de; --accent: #3b7dd8; --accent-2: #d8823b; --accent-3: #4a9d6f; --accent-4: #c24b4b;
+    --bad: #c24b4b; --warn: #c2914b; --radius: 10px;
+    --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --font-serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #17181a; --panel: #1f2023; --fg: #ececec; --fg-muted: #9a9a9e;
+      --border: #2d2e31; --accent: #6ca3ec; --accent-2: #e8a267; --accent-3: #6fbf93; --accent-4: #e07a7a;
+      --bad: #e07a7a; --warn: #e0b36f; color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #17181a; --panel: #1f2023; --fg: #ececec; --fg-muted: #9a9a9e;
+    --border: #2d2e31; --accent: #6ca3ec; --accent-2: #e8a267; --accent-3: #6fbf93; --accent-4: #e07a7a;
+    --bad: #e07a7a; --warn: #e0b36f; color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg); font-family: var(--font-sans);
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; padding-block: 2rem 4rem; display: flex; flex-direction: column; gap: 1.75rem; }
+  a { color: var(--accent); }
+
+  .header h1 { font-family: var(--font-serif); font-weight: 400; font-size: 1.9rem; margin: 0 0 .4rem 0; }
+  .header .takeaway { margin: 0; color: var(--fg-muted); max-width: 64ch; line-height: 1.5; }
+  .header .src { margin: .6rem 0 0 0; font-size: .82rem; color: var(--fg-muted); }
+
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.25rem; }
+  .card h2 { margin: 0 0 .15rem 0; font-size: 1.05rem; font-weight: 600; }
+  .card .note { margin: 0 0 .75rem 0; color: var(--fg-muted); font-size: .8rem; }
+
+  .scenario-card .slider-row { display: flex; align-items: center; gap: .9rem; }
+  .scenario-card label { font-weight: 600; white-space: nowrap; }
+  .scenario-card input[type=range] { flex: 1; accent-color: var(--accent); }
+  .scenario-card .tariff-value { font-family: var(--font-serif); font-size: 1.2rem; font-variant-numeric: tabular-nums; min-width: 3.6rem; text-align: right; }
+  .scenario-card .note { margin-top: .6rem; }
+
+  .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); gap: 1rem; }
+  .kpi-card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.25rem; }
+  .kpi-card .label { color: var(--fg-muted); font-size: .8rem; margin-bottom: .35rem; }
+  .kpi-card .value { font-family: var(--font-serif); font-weight: 400; font-size: 1.75rem; font-variant-numeric: tabular-nums; }
+  .kpi-card .sub { color: var(--fg-muted); font-size: .8rem; margin-top: .25rem; }
+
+  .tabs { display: flex; gap: .25rem; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  .tab-btn { appearance: none; background: none; border: none; cursor: pointer; padding: .6rem .9rem; font-size: 1rem; color: var(--fg-muted); border-bottom: 2px solid transparent; font-family: var(--font-sans); }
+  .tab-btn[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); font-weight: 600; }
+  .tab-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .tabpanel { display: flex; flex-direction: column; gap: 1rem; }
+  .chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr)); gap: 1rem; }
+  .chart-box { position: relative; min-height: 220px; }
+  .chart-box svg { width: 100%; height: auto; overflow: visible; }
+  .legend-end { font-size: .8rem; font-weight: 600; }
+
+  .tooltip {
+    position: absolute; pointer-events: none; background: var(--panel); border: 1px solid var(--border);
+    border-radius: 8px; box-shadow: 0 4px 14px rgba(0,0,0,.18); padding: .35rem .6rem; font-size: .8rem;
+    opacity: 0; transition: opacity .1s; white-space: nowrap; z-index: 5;
+  }
+  .tooltip .t-date { color: var(--fg-muted); margin-bottom: .15rem; }
+  .tooltip .t-row { display: flex; align-items: center; gap: .35rem; }
+  .tooltip .t-swatch { width: .55rem; height: .55rem; border-radius: 50%; display: inline-block; }
+
+  table.datatable { width: 100%; border-collapse: collapse; font-size: .95rem; font-variant-numeric: tabular-nums; }
+  table.datatable th, table.datatable td { text-align: right; padding: .45rem .6rem; border-bottom: 1px solid var(--border); }
+  table.datatable th:first-child, table.datatable td:first-child { text-align: left; }
+  table.datatable thead th { color: var(--fg-muted); font-weight: 600; font-size: .8rem; }
+
+  .about-prose { max-width: 70ch; line-height: 1.6; }
+  .about-prose h3 { font-size: 1.05rem; margin: 1.4rem 0 .5rem 0; }
+  .about-prose h3:first-child { margin-top: 0; }
+  .about-prose ul { padding-left: 1.2rem; }
+  .about-prose li { margin-bottom: .5rem; }
+  .about-prose code { background: var(--border); border-radius: 4px; padding: .05rem .3rem; font-size: .9em; }
+  .bug-sev { font-size: .75rem; font-weight: 600; border-radius: 4px; padding: .1rem .45rem; margin-right: .4rem; }
+  .bug-sev.high { background: rgba(194,75,75,.15); color: var(--bad); }
+  .bug-sev.med { background: rgba(194,145,75,.18); color: var(--warn); }
+
+  footer { color: var(--fg-muted); font-size: .8rem; text-align: center; padding-top: 1rem; border-top: 1px solid var(--border); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="header">
+    <h1>Abolishing Import Tariffs: a Dynamic CGE Explorer</h1>
+    <p class="takeaway" id="takeaway">Loading…</p>
+    <p class="src">Data and findings from <a href="https://github.com/macrofinancial/cge_dyn_1">macrofinancial/cge_dyn_1</a> — see the <a href="#about">Method &amp; findings</a> tab for provenance.</p>
+  </div>
+
+  <div class="card scenario-card">
+    <h2>Scenario</h2>
+    <div class="slider-row">
+      <label for="tariffSlider">Tariff cut applied</label>
+      <input type="range" id="tariffSlider" min="0" max="100" step="5" value="100" aria-describedby="tariffNote">
+      <span class="tariff-value" id="tariffValue">100%</span>
+    </div>
+    <p class="note" id="tariffNote">0% is business-as-usual &mdash; no policy change, every chart flat at zero. 100% is the full abolition of import tariffs, exactly as solved by the original GAMS model. Values in between scale that solved outcome linearly; they illustrate the direction of adjustment but were not separately re-solved. Only 0% and 100% are model-verified points.</p>
+  </div>
+
+  <div class="kpi-row" id="kpiRow">
+    <div class="kpi-card">
+      <div class="label">Discounted welfare gain (EV, 31 periods)</div>
+      <div class="value" id="kpi-ev">—</div>
+      <div class="sub">billion JPY equivalent, 2005 base year</div>
+    </div>
+    <div class="kpi-card">
+      <div class="label">Utility change, period 30</div>
+      <div class="value" id="kpi-util">—</div>
+      <div class="sub">vs. business-as-usual felicity index</div>
+    </div>
+    <div class="kpi-card">
+      <div class="label">Real exchange rate, period 30</div>
+      <div class="value" id="kpi-fx">—</div>
+      <div class="sub">epsilon, vs. business-as-usual</div>
+    </div>
+  </div>
+
+  <div class="tabs" role="tablist">
+    <button class="tab-btn" role="tab" aria-selected="true" data-tab="welfare">Welfare</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-tab="sectoral">Sectoral output</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-tab="trade">Trade, prices &amp; factors</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-tab="about">Method &amp; findings</button>
+  </div>
+
+  <div class="tabpanel" id="panel-welfare">
+    <div class="chart-grid">
+      <div class="card">
+        <h2>Utility change vs. BAU</h2>
+        <p class="note">Household felicity (dCC), period 0&ndash;30</p>
+        <div class="chart-box" id="chart-util"></div>
+      </div>
+      <div class="card">
+        <h2>Equivalent variation by period</h2>
+        <p class="note">Hicksian EV, level, billion JPY equivalent</p>
+        <div class="chart-box" id="chart-ev"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tabpanel" id="panel-sectoral" hidden>
+    <div class="card">
+      <h2>Sectoral output change vs. BAU</h2>
+      <p class="note">Gross output (dZ) by sector, period 0&ndash;30</p>
+      <div class="chart-box" id="chart-sectoral" style="min-height:280px"></div>
+    </div>
+    <div class="card">
+      <h2>Output change at period 30</h2>
+      <p class="note">Same series, final period</p>
+      <div class="chart-box" id="chart-sectoral-bar"></div>
+    </div>
+  </div>
+
+  <div class="tabpanel" id="panel-trade" hidden>
+    <div class="chart-grid">
+      <div class="card">
+        <h2>Trade volumes, period 0 vs. 30</h2>
+        <p class="note">Under the full-abolition scenario (not slider-scaled) &mdash; billion JPY</p>
+        <div class="chart-box" id="chart-trade"></div>
+      </div>
+      <div class="card">
+        <h2>Composite good prices, period 30</h2>
+        <p class="note">Armington price (pq) by sector</p>
+        <div class="chart-box" id="chart-prices"></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Factor demand by sector, period 30</h2>
+      <p class="note">Change in capital and labor input use vs. BAU</p>
+      <div style="overflow-x:auto">
+        <table class="datatable" id="table-factors">
+          <thead><tr><th>Sector</th><th>Capital stock</th><th>Capital input</th><th>Labor input</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="tabpanel" id="panel-about" hidden>
+    <div class="card about-prose" id="about">
+      <h3>What this model does</h3>
+      <p>This is a 4-sector, 2-factor recursive-dynamic computable general equilibrium model (31 annual periods), calibrated from a 2005 social accounting matrix and built in GAMSPy. Production nests Cobb&ndash;Douglas value-added over CES factor demand; trade uses an Armington CES import/domestic aggregate and a CET export/domestic transformation; capital accumulates period to period (<code>KK<sub>t+1</sub> = (1&minus;&delta;)KK<sub>t</sub> + II<sub>t</sub></code>) and labor grows with population. The experiment abolishes the import tariff (<code>taum &rarr; 0</code>) in every period and compares the resulting path to business-as-usual.</p>
+
+      <h3>How this page gets its numbers</h3>
+      <p>Solving this model needs a real GAMS engine/license, which wasn't available where this page was first built, so the initial dataset was digitized from the source notebook's own saved output (the charts and printed summary from a run with real GAMS) by pixel-calibrating each matplotlib figure against its axes. Values at period 0 and 30 match the notebook's printed text exactly; periods 1&ndash;29 were read off the plotted curves. See <code>data/</code> and <code>export_for_dashboard.py</code> in this repo for the exact export path and how to replace this with a full-precision GAMS-solved export.</p>
+
+      <h3>Findings on the notebook</h3>
+      <ul>
+        <li><span class="bug-sev high">bug</span><strong>The first, "official" run silently produces a near-zero result.</strong> The notebook's own saved output shows two back-to-back executions: calling <code>results.main()</code> prints <code>EV_TTL: -0.0</code> and every deviation at 0.000%, while immediately rebuilding the model by hand in the same kernel gives the real result, <code>EV_TTL: 5,741.29</code>. The tariff shock is identical in both calls, so this points to state leaking across two <code>Container()</code>/model builds in one GAMSPy process &mdash; the notebook's primary entry point (<code>main()</code>) is not safe to trust on its own.</li>
+        <li><span class="bug-sev high">bug</span><strong><code>compute_results()</code> drops <code>dF</code> from its return value.</strong> The function builds a factor-allocation deviation parameter internally but returns a dict without it. The later cell that reads it (<code>dF = out.get("dF", None)</code> then <code>dF.records</code>) will raise <code>AttributeError</code> the first time it's run after a fresh <code>compute_results()</code> call.</li>
+        <li><span class="bug-sev med">watch</span><strong>Two "kept as in original" quirks</strong> are flagged in comments but not resolved: <code>eqpf2[h_mob, i, j]</code> equates <code>pf[h_mob, j]</code> to <code>pf[h_mob, i]</code> for every <code>(i, j)</code> pair rather than pinning to one reference sector, and <code>eqPRICE</code> weights <code>pq[j]</code> by the alias <code>j</code> where the rest of the block uses <code>i</code>.</li>
+        <li><span class="bug-sev med">watch</span><strong>The baseline solve is pinned to an exact assertion</strong> (<code>math.isclose(dyncge.objective_value, 539570.5027, rel_tol=0.001)</code>). Useful as a regression guard, but it will hard-fail the whole pipeline if the SAM, elasticities or growth assumptions ever change.</li>
+      </ul>
+
+      <h3>Reading the scenario slider</h3>
+      <p>Every series above except trade volumes is already a deviation from business-as-usual, so it's exactly zero under no policy change. The slider scales that deviation linearly between 0% (BAU) and 100% (the GAMS-solved full abolition) to let you explore intermediate tariff cuts; it's a simplification for interactivity, not a separate equilibrium solve.</p>
+    </div>
+  </div>
+
+  <footer>Built with d3.js. Source and data in this repository.</footer>
+</div>
+
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+(async () => {
+  const fmt1 = d3.format('+.2f');
+  const fmtInt = d3.format(',.0f');
+  const fmtSigned0 = d3.format('+,.0f');
+  const tooltip = document.getElementById('tooltip');
+  const colors = ['#3b7dd8', '#d8823b', '#4a9d6f', '#c24b4b'];
+
+  let scale = 1;
+  const slider = document.getElementById('tariffSlider');
+  const sliderVal = document.getElementById('tariffValue');
+  slider.addEventListener('input', () => {
+    scale = (+slider.value) / 100;
+    sliderVal.textContent = slider.value + '%';
+    render();
+  });
+
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tab-btn').forEach(b => b.setAttribute('aria-selected', String(b === btn)));
+      document.querySelectorAll('.tabpanel').forEach(p => p.hidden = true);
+      document.getElementById('panel-' + btn.dataset.tab).hidden = false;
+      render();
+    });
+  });
+
+  function measureWidth(el) { return Math.max(el.clientWidth || 320, 240); }
+
+  function drawLines(container, rows, seriesSpec, opts = {}) {
+    container.innerHTML = '';
+    const width = measureWidth(container);
+    const height = opts.height || 220;
+    const margin = { top: 14, right: 46, bottom: 26, left: 42 };
+    const innerW = width - margin.left - margin.right;
+    const innerH = height - margin.top - margin.bottom;
+
+    const x = d3.scaleLinear().domain(d3.extent(rows, d => d.period)).range([0, innerW]);
+    let allVals = [];
+    seriesSpec.forEach(s => rows.forEach(r => allVals.push(r[s.key])));
+    allVals.push(0);
+    let [ymin, ymax] = d3.extent(allVals);
+    if (ymin === ymax) { ymin -= 1; ymax += 1; }
+    const pad = (ymax - ymin) * 0.12 || 1;
+    const y = d3.scaleLinear().domain([ymin - pad, ymax + pad]).range([innerH, 0]);
+
+    const svg = d3.select(container).append('svg').attr('viewBox', `0 0 ${width} ${height}`).attr('width', '100%').attr('height', height);
+    const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+    g.append('line').attr('x1', 0).attr('x2', innerW).attr('y1', y(0)).attr('y2', y(0))
+      .attr('stroke', 'var(--border)').attr('stroke-width', 1);
+
+    g.append('g').attr('transform', `translate(0,${innerH})`).call(d3.axisBottom(x).ticks(6).tickFormat(d3.format('d')))
+      .call(sel => sel.selectAll('text').attr('fill', 'var(--fg-muted)').style('font-size', '11px'))
+      .call(sel => sel.selectAll('path,line').attr('stroke', 'var(--border)'));
+    g.append('g').call(d3.axisLeft(y).ticks(5))
+      .call(sel => sel.selectAll('text').attr('fill', 'var(--fg-muted)').style('font-size', '11px'))
+      .call(sel => sel.selectAll('path,line').attr('stroke', 'var(--border)'));
+
+    const line = d3.line().x(d => x(d.period)).y(d => y(d.value)).curve(d3.curveMonotoneX);
+
+    seriesSpec.forEach((s) => {
+      const pts = rows.map(r => ({ period: r.period, value: r[s.key] }));
+      g.append('path').datum(pts).attr('fill', 'none').attr('stroke', s.color).attr('stroke-width', 2)
+        .attr('stroke-linecap', 'round').attr('stroke-linejoin', 'round').attr('d', line);
+      if (seriesSpec.length > 1) {
+        const last = pts[pts.length - 1];
+        g.append('text').attr('x', x(last.period) + 5).attr('y', y(last.value)).attr('dy', '.32em')
+          .attr('fill', s.color).attr('class', 'legend-end').style('font-size', '11px').text(s.label);
+      }
+    });
+
+    const hoverLine = g.append('line').attr('y1', 0).attr('y2', innerH).attr('stroke', 'var(--fg-muted)').attr('stroke-width', 1).style('opacity', 0);
+    const hoverDots = seriesSpec.map(s => g.append('circle').attr('r', 3.5).attr('fill', s.color).style('opacity', 0));
+
+    svg.append('rect').attr('x', margin.left).attr('y', margin.top).attr('width', innerW).attr('height', innerH).attr('fill', 'transparent')
+      .on('mousemove', (ev) => {
+        const [mx] = d3.pointer(ev, g.node());
+        const period = Math.round(x.invert(mx));
+        const row = rows.find(r => r.period === period);
+        if (!row) return;
+        hoverLine.attr('x1', x(period)).attr('x2', x(period)).style('opacity', 1);
+        let html = `<div class="t-date">Period ${period}</div>`;
+        seriesSpec.forEach((s, i) => {
+          hoverDots[i].attr('cx', x(period)).attr('cy', y(row[s.key])).style('opacity', 1);
+          html += `<div class="t-row"><span class="t-swatch" style="background:${s.color}"></span>${s.label}: ${opts.fmt ? opts.fmt(row[s.key]) : row[s.key].toFixed(3)}</div>`;
+        });
+        tooltip.innerHTML = html;
+        const boxRect = container.getBoundingClientRect();
+        tooltip.style.left = (ev.clientX - boxRect.left + 12) + 'px';
+        tooltip.style.top = (ev.clientY - boxRect.top - 10) + 'px';
+        tooltip.style.opacity = 1;
+      })
+      .on('mouseleave', () => { tooltip.style.opacity = 0; hoverLine.style.opacity = 0; hoverDots.forEach(d => d.style.opacity = 0); });
+  }
+
+  function drawBars(container, data, opts = {}) {
+    container.innerHTML = '';
+    const width = measureWidth(container);
+    const height = opts.height || 200;
+    const margin = { top: 14, right: 16, bottom: 30, left: 44 };
+    const innerW = width - margin.left - margin.right;
+    const innerH = height - margin.top - margin.bottom;
+
+    const x0 = d3.scaleBand().domain(data.map(d => d.group)).range([0, innerW]).padding(0.3);
+    const keys = opts.keys;
+    const x1 = d3.scaleBand().domain(keys.map(k => k.key)).range([0, x0.bandwidth()]).padding(0.15);
+    let vals = [];
+    data.forEach(d => keys.forEach(k => vals.push(d[k.key])));
+    vals.push(0);
+    let [ymin, ymax] = d3.extent(vals);
+    if (ymin === ymax) { ymin -= 1; ymax += 1; }
+    const padY = (ymax - ymin) * 0.15 || 1;
+    const y = d3.scaleLinear().domain([Math.min(0, ymin - padY), ymax + padY]).range([innerH, 0]);
+
+    const svg = d3.select(container).append('svg').attr('viewBox', `0 0 ${width} ${height}`).attr('width', '100%').attr('height', height);
+    const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+    g.append('line').attr('x1', 0).attr('x2', innerW).attr('y1', y(0)).attr('y2', y(0)).attr('stroke', 'var(--border)');
+
+    g.append('g').attr('transform', `translate(0,${innerH})`).call(d3.axisBottom(x0).tickSize(0))
+      .call(sel => sel.selectAll('text').attr('fill', 'var(--fg-muted)').style('font-size', '11px'))
+      .call(sel => sel.select('.domain').attr('stroke', 'var(--border)'));
+    g.append('g').call(d3.axisLeft(y).ticks(5))
+      .call(sel => sel.selectAll('text').attr('fill', 'var(--fg-muted)').style('font-size', '11px'))
+      .call(sel => sel.selectAll('path,line').attr('stroke', 'var(--border)'));
+
+    const groups = g.selectAll('.g').data(data).join('g').attr('transform', d => `translate(${x0(d.group)},0)`);
+    keys.forEach(k => {
+      groups.append('rect')
+        .attr('x', x1(k.key)).attr('width', x1.bandwidth())
+        .attr('y', d => y(Math.max(0, d[k.key]))).attr('height', d => Math.abs(y(d[k.key]) - y(0)))
+        .attr('rx', 3).attr('fill', k.color)
+        .on('mousemove', function (ev, d) {
+          tooltip.innerHTML = `<div class="t-date">${d.group}</div><div class="t-row"><span class="t-swatch" style="background:${k.color}"></span>${k.label}: ${opts.fmt ? opts.fmt(d[k.key]) : d[k.key]}</div>`;
+          const boxRect = container.getBoundingClientRect();
+          tooltip.style.left = (ev.clientX - boxRect.left + 12) + 'px';
+          tooltip.style.top = (ev.clientY - boxRect.top - 10) + 'px';
+          tooltip.style.opacity = 1;
+        })
+        .on('mouseleave', () => tooltip.style.opacity = 0);
+    });
+
+    if (keys.length > 1 && opts.legend !== false) {
+      const lg = svg.append('g').attr('transform', `translate(${margin.left},${height - 4})`);
+      let ox = 0;
+      keys.forEach(k => {
+        lg.append('circle').attr('cx', ox).attr('cy', -4).attr('r', 4).attr('fill', k.color);
+        const t = lg.append('text').attr('x', ox + 9).attr('y', 0).style('font-size', '11px').attr('fill', 'var(--fg-muted)').text(k.label);
+        ox += 9 + (t.node().getComputedTextLength() || 40) + 14;
+      });
+    }
+  }
+
+  // ---- load data (static JSON files shipped in this repo) ----
+  const [welfare, sectoral, trade, pc, summary] = await Promise.all([
+    fetch('data/welfare_path.json').then(r => r.json()),
+    fetch('data/sectoral_path.json').then(r => r.json()),
+    fetch('data/trade_balance.json').then(r => r.json()),
+    fetch('data/price_capital_t30.json').then(r => r.json()),
+    fetch('data/summary.json').then(r => r.json()).then(a => a[0]),
+  ]);
+
+  function setKpi(id, text) { document.getElementById(id).textContent = text; }
+
+  function render() {
+    const evTtl = summary.ev_ttl * scale;
+    const util = summary.utility_change_t30_pct * scale;
+    const fx = summary.exchange_rate_change_pct * scale;
+    document.getElementById('takeaway').textContent =
+      scale === 0
+        ? 'At 0% tariff cut the economy tracks business-as-usual exactly: every series below is flat at zero.'
+        : `At a ${slider.value}% tariff cut, discounted welfare rises by ${fmtInt(evTtl)} billion JPY equivalent over the 31-period horizon, with household utility ${util >= 0 ? 'up' : 'down'} ${Math.abs(util).toFixed(3)}% by period 30.`;
+    setKpi('kpi-ev', fmtSigned0(evTtl));
+    setKpi('kpi-util', fmt1(util) + '%');
+    setKpi('kpi-fx', fmt1(fx) + '%');
+
+    if (!document.getElementById('panel-welfare').hidden) {
+      const rows = welfare.map(r => ({ period: r.period, utility_change_pct: r.utility_change_pct * scale, ev_level: r.ev_level * scale }));
+      drawLines(document.getElementById('chart-util'), rows, [{ key: 'utility_change_pct', label: 'dCC', color: colors[0] }], { fmt: v => v.toFixed(3) + '%' });
+      drawLines(document.getElementById('chart-ev'), rows, [{ key: 'ev_level', label: 'EV', color: colors[1] }], { fmt: v => fmtInt(v) });
+    }
+
+    if (!document.getElementById('panel-sectoral').hidden) {
+      const secs = ['AGR', 'LMN', 'HMN', 'SRV'];
+      const rows = sectoral.map(r => {
+        const o = { period: r.period };
+        secs.forEach(s => o[s] = r[s] * scale);
+        return o;
+      });
+      const spec = secs.map((s, i) => ({ key: s, label: s, color: colors[i] }));
+      drawLines(document.getElementById('chart-sectoral'), rows, spec, { height: 260, fmt: v => v.toFixed(3) + '%' });
+      const last = rows[rows.length - 1];
+      drawBars(document.getElementById('chart-sectoral-bar'), secs.map(s => ({ group: s, v: last[s] })), { keys: [{ key: 'v', label: 'dZ, period 30', color: colors[0] }], legend: false, fmt: v => v.toFixed(3) + '%' });
+    }
+
+    if (!document.getElementById('panel-trade').hidden) {
+      const tradeRows = trade.map(r => ({ group: 'Period ' + r.period, exports: r.exports, imports: r.imports }));
+      drawBars(document.getElementById('chart-trade'), tradeRows, { keys: [{ key: 'exports', label: 'Exports', color: colors[0] }, { key: 'imports', label: 'Imports', color: colors[1] }], fmt: v => fmtInt(v) + ' bn JPY' });
+
+      const priceRows = pc.map(r => ({ group: r.sector, price_change_pct: r.price_change_pct * scale }));
+      drawBars(document.getElementById('chart-prices'), priceRows, { keys: [{ key: 'price_change_pct', label: 'Price change', color: colors[2] }], legend: false, fmt: v => v.toFixed(3) + '%' });
+
+      const tbody = document.querySelector('#table-factors tbody');
+      tbody.innerHTML = '';
+      pc.forEach(r => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${r.sector}</td><td>${fmt1(r.capital_change_pct * scale)}%</td><td>${fmt1(r.cap_input_change_pct * scale)}%</td><td>${fmt1(r.lab_input_change_pct * scale)}%</td>`;
+        tbody.appendChild(tr);
+      });
+    }
+  }
+
+  render();
+  window.addEventListener('resize', render);
+})();
+</script>
+</body>
+</html>
