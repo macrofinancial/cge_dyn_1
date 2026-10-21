@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+# generated outputs - results come from the user's own GAMSPy run, not committed
+pep1t_dashboard.html
+pep1t_results.xlsx
+pep1t_parameters.xlsx
